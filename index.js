@@ -22,6 +22,7 @@ app.use(express.json());
 const port = process.env.PORT || 9000;
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const moment = require("moment");
 
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@graphicsaction.dpne6.mongodb.net/?retryWrites=true&w=majority&appName=Graphicsaction`;
 
@@ -42,7 +43,7 @@ app.get("/", (req, res) => {
 // Middleware to verify JWT
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  console.log('Authorization Header:', authHeader); // Log the header
+
 
   if (!authHeader) {
     return res.status(401).send({ message: "No token provided" });
@@ -900,11 +901,75 @@ async function run() {
       res.send(result);
     });
 
-    // Get all sales invoices
-    app.get("/getFullSales", async (req, res) => {
-        const result = await salesInvoiceCollections.find().toArray();
-        res.send(result);
+    // ---------------------------Summary start-----------------------------------------------------------------
+
+    app.get("/getSummary", async (req, res) => {
+      try {
+        const todaysDate = moment(new Date()).format("DD.MM.YYYY");
+
+        // Fetch sales invoices for today's date
+        const salesInvoices = await salesInvoiceCollections.find({ date: todaysDate }).toArray();
+        const totalSales = salesInvoices.reduce((acc, sale) => acc + sale.grandTotal, 0).toFixed(2);
+        const totalDue = salesInvoices.reduce((acc, sale) => acc + sale.dueAmount, 0).toFixed(2);
+        const totalCashSales = salesInvoices.reduce((acc, sale) => acc + sale.finalPayAmount, 0).toFixed(2);
+
+        // Calculate total amount collected from due (paid by customers today) in sales
+        const salesDueCollections = await customerDueCollections.find().toArray();
+        const totalCollectedDueFromSales = salesDueCollections.reduce((acc, sale) => {
+          const todaysPayments = sale.paymentHistory
+            ? sale.paymentHistory
+              .filter(payment => payment.date === todaysDate)
+              .reduce((sum, payment) => sum + payment.paidAmount, 0)
+            : 0;
+          return acc + todaysPayments;
+        }, 0).toFixed(2);
+
+        const saleSummary = { totalSales, totalDue, totalCashSales, totalCollectedDueFromSales };
+
+        // Fetch purchase invoices for today's date
+        const purchaseInvoices = await purchaseInvoiceCollections.find({ date: todaysDate }).toArray();
+        const totalPurchase = purchaseInvoices.reduce((acc, purchase) => acc + purchase.grandTotal, 0).toFixed(2);
+        const totalPurchaseDue = purchaseInvoices.reduce((acc, purchase) => acc + purchase.dueAmount, 0).toFixed(2);
+        const totalCashPurchase = purchaseInvoices.reduce((acc, purchase) => acc + purchase.finalPayAmount, 0).toFixed(2);
+
+        // Calculate total amount collected from due (paid by you today) in purchases
+        const purchaseDueCollections = await supplierDueCollections.find().toArray();
+        const totalCollectedDueFromPurchases = purchaseDueCollections.reduce((acc, purchase) => {
+          const todaysPayments = purchase.paymentHistory
+            ? purchase.paymentHistory
+              .filter(payment => payment.date === todaysDate)
+              .reduce((sum, payment) => sum + payment.paidAmount, 0)
+            : 0;
+          return acc + todaysPayments;
+        }, 0).toFixed(2);
+
+        const purchaseSummary = { totalPurchase, totalPurchaseDue, totalCashPurchase, totalCollectedDueFromPurchases };
+
+        const transactions = await transactionCollections.find({
+          $and: [
+            { date: todaysDate },
+            { type: 'Cost' }
+          ]
+        }).toArray();
+
+        const todaysCost = transactions.reduce((acc, trans) => acc + trans.totalBalance, 0).toFixed(2);
+        const expenseSummary = { todaysCost };
+
+        // Send the calculated data back to the client
+        res.status(200).send({
+          saleSummary,
+          purchaseSummary,
+          expenseSummary,
+        });
+
+      } catch (error) {
+        console.error("Error fetching sales summary:", error);
+        res.status(500).send({ message: "Server error while fetching summary" });
+      }
+
     });
+
+    // ---------------------------Summary end---------------------------------------------------------------------
 
     // new sales invoice...........................................
     app.post("/newSalesInvoice", async (req, res) => {
@@ -1323,6 +1388,11 @@ async function run() {
                 ? numericSearch
                 : { $exists: false },
             },
+            {
+              customerSerial: numericSearch
+                ? numericSearch
+                : { $exists: false },
+            },
             { customerAddress: { $regex: new RegExp(search, "i") } },
             { contactNumber: { $regex: new RegExp(search, "i") } },
 
@@ -1577,6 +1647,11 @@ async function run() {
             { supplierName: { $regex: new RegExp(search, "i") } },
             {
               supplierSerial: numericSearch
+                ? numericSearch
+                : { $exists: false },
+            },
+            {
+              dueAmount: numericSearch
                 ? numericSearch
                 : { $exists: false },
             },
