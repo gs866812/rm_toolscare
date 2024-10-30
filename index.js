@@ -79,9 +79,10 @@ app.post("/jwt", (req, res) => {
   res.send({ success: true, token });
 });
 
+
 // JWT token validation route
 app.post("/validate-token", (req, res) => {
-  const { token } = req.body;
+  const token = req.headers.authorization?.split(" ")[1]; // Extract token from 'Authorization' header
 
   if (!token) {
     return res
@@ -101,6 +102,7 @@ app.post("/validate-token", (req, res) => {
     res.send({ success: true, user: decoded });
   });
 });
+
 
 app.post("/logOut", async (req, res) => {
   res.clearCookie("token", { maxAge: 0 }).send({ success: true });
@@ -199,6 +201,36 @@ async function run() {
           productCode,
         });
         res.send(result);
+      }
+    });
+
+    // New sale product (full collection for input)
+    app.get("/newSaleProducts", async (req, res) => {
+
+      try {
+        const products = await productCollections
+          .find()
+          .sort({ _id: -1 })
+          .toArray();
+        res.send({ products });
+      } catch (error) {
+        console.error("Error fetching products:", error);
+        res.status(500).send("An error occurred while fetching products.");
+      }
+    });
+
+    // New purchase product (full collection for input)
+    app.get("/newPurchaseProducts", async (req, res) => {
+
+      try {
+        const products = await productCollections
+          .find()
+          .sort({ _id: -1 })
+          .toArray();
+        res.send({ products });
+      } catch (error) {
+        console.error("Error fetching products:", error);
+        res.status(500).send("An error occurred while fetching products.");
       }
     });
 
@@ -918,7 +950,7 @@ async function run() {
         const totalCollectedDueFromSales = salesDueCollections.reduce((acc, sale) => {
           const todaysPayments = sale.paymentHistory
             ? sale.paymentHistory
-              .filter(payment => payment.date === todaysDate)
+              .filter(payment => payment.date === todaysDate && payment.paymentMethod != "Return")
               .reduce((sum, payment) => sum + payment.paidAmount, 0)
             : 0;
           return acc + todaysPayments;
@@ -937,7 +969,7 @@ async function run() {
         const totalCollectedDueFromPurchases = purchaseDueCollections.reduce((acc, purchase) => {
           const todaysPayments = purchase.paymentHistory
             ? purchase.paymentHistory
-              .filter(payment => payment.date === todaysDate)
+              .filter(payment => payment.date === todaysDate && payment.paymentMethod != "Return")
               .reduce((sum, payment) => sum + payment.paidAmount, 0)
             : 0;
           return acc + todaysPayments;
@@ -2044,23 +2076,22 @@ async function run() {
       const query = search
         ? {
           $or: [
-            { productID: numericSearch ? numericSearch : { $exists: false } },
-            {
-              purchaseQuantity: numericSearch
-                ? numericSearch
-                : { $exists: false },
-            },
-            {
-              salesPrice: numericSearch ? numericSearch : { $exists: false },
-            },
-            { productTitle: { $regex: new RegExp(search, "i") } },
-            { purchaseUnit: { $regex: new RegExp(search, "i") } },
-            { category: { $regex: new RegExp(search, "i") } },
-            { brand: { $regex: new RegExp(search, "i") } },
-            { storage: { $regex: new RegExp(search, "i") } },
+            ...(numericSearch !== null
+              ? [
+                { productID: numericSearch },
+              ]
+              : []),
+            ...(isNaN(search)
+              ? [
+
+                { productTitle: { $regex: `\\b${search}\\b`, $options: "i" } },
+              ]
+              : []),
           ],
         }
         : {};
+
+
 
       // Get paginated results
       const result = await stockCollections
