@@ -204,6 +204,7 @@ async function run() {
       }
     });
 
+    // New sale product (filtered collection for input)
     // New sale product (full collection for input)
     app.get("/newSaleProducts", async (req, res) => {
 
@@ -218,6 +219,7 @@ async function run() {
         res.status(500).send("An error occurred while fetching products.");
       }
     });
+
 
     // New purchase product (full collection for input)
     app.get("/newPurchaseProducts", async (req, res) => {
@@ -1442,6 +1444,15 @@ async function run() {
       res.send({ result, count });
     });
     // show customer Ledger end .............................................
+
+    // Get all customer for excel download
+    app.get("/allCustomer", async (req, res) => {
+      const result = await customerDueCollections
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
+      res.send(result);
+    });
 
     // new purchase invoice...........................................
     app.post("/newPurchaseInvoice", async (req, res) => {
