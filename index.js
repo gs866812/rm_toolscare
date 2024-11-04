@@ -51,7 +51,7 @@ const verifyToken = (req, res, next) => {
 
   const token = authHeader.split(" ")[1];
   if (!token) {
-    return res.status(401).send({ message: "No token provided" });
+    return res.status(401).send({ message: "Access forbidden" });
   }
 
   jwt.verify(token, process.env.TOKEN_SECRET, (err, decoded) => {
@@ -206,9 +206,16 @@ async function run() {
 
     // New sale product (filtered collection for input)
     // New sale product (full collection for input)
-    app.get("/newSaleProducts", async (req, res) => {
+    app.get("/newSaleProducts", verifyToken, async (req, res) => {
+
 
       try {
+        const userMail = req.query["userEmail"];
+        const email = req.user["email"];
+
+        if (userMail !== email) {
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
         const products = await productCollections
           .find()
           .sort({ _id: -1 })
@@ -222,9 +229,16 @@ async function run() {
 
 
     // New purchase product (full collection for input)
-    app.get("/newPurchaseProducts", async (req, res) => {
+    app.get("/newPurchaseProducts", verifyToken, async (req, res) => {
 
       try {
+        const userMail = req.query["userEmail"];
+        const email = req.user["email"];
+
+        if (userMail !== email) {
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
+
         const products = await productCollections
           .find()
           .sort({ _id: -1 })
@@ -463,10 +477,17 @@ async function run() {
     });
 
     // show supplier
-    app.get("/suppliers", async (req, res) => {
+    app.get("/suppliers", verifyToken, async (req, res) => {
       const page = parseInt(req.query.page);
       const size = parseInt(req.query.size);
       const search = req.query.search || "";
+
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
 
       let numericSearch = parseFloat(search);
       if (isNaN(numericSearch)) {
@@ -735,6 +756,58 @@ async function run() {
 
       res.send({ result, count });
     });
+    // show all transactions of costing list............................................
+    app.get("/costingTransactions", verifyToken, async (req, res) => {
+      const page = parseInt(req.query.page);
+      const size = parseInt(req.query.size);
+      const search = req.query.search || "";
+
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
+
+      let numericSearch = parseFloat(search);
+      if (isNaN(numericSearch)) {
+        numericSearch = null;
+      }
+
+      // Add `type: "Cost"` directly to the query object
+      const query = {
+        type: "Cost",
+        ...(search
+          ? {
+            $or: [
+              { note: { $regex: new RegExp(search, "i") } },
+              { serial: numericSearch ? numericSearch : { $exists: false } },
+              { totalBalance: numericSearch ? numericSearch : { $exists: false } },
+              { date: { $regex: new RegExp(search, "i") } },
+              { type: { $regex: new RegExp(search, "i") } },
+              { userName: { $regex: new RegExp(search, "i") } },
+            ],
+          }
+          : {}),
+      };
+
+      try {
+        const result = await transactionCollections
+          .find(query)
+          .skip((page - 1) * size)
+          .limit(size)
+          .sort({ _id: -1 })
+          .toArray();
+
+        const count = await transactionCollections.countDocuments(query);
+
+        res.send({ result, count });
+      } catch (error) {
+        console.error("Error fetching costing transactions:", error);
+        res.status(500).send("An error occurred while fetching costing transactions.");
+      }
+    });
+
 
     // .....................................................................
 
@@ -823,8 +896,12 @@ async function run() {
     });
 
     //get temp sales product list..........................................
-    app.get("/tempSalesProductList/:userEmail", async (req, res) => {
+    app.get("/tempSalesProductList/:userEmail", verifyToken, async (req, res) => {
       const userEmail = req.params.userEmail;
+      const email = req.user["email"];
+      if (userEmail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
       const findByMail = await tempSalesProductCollections
         .find({ userMail: userEmail })
         .sort({ _id: -1 })
@@ -835,8 +912,12 @@ async function run() {
     });
 
     //get temp quotation product list..........................................
-    app.get("/tempQuotationProductList/:userEmail", async (req, res) => {
+    app.get("/tempQuotationProductList/:userEmail", verifyToken, async (req, res) => {
       const userEmail = req.params.userEmail;
+      const email = req.user["email"];
+      if (userEmail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
       const result = await tempQuotationProductCollections
         .find({ userMail: userEmail })
         .toArray();
@@ -885,8 +966,12 @@ async function run() {
     });
 
     //get temp purchase product list..........................................
-    app.get("/tempPurchaseProductList/:userEmail", async (req, res) => {
+    app.get("/tempPurchaseProductList/:userEmail", verifyToken, async (req, res) => {
       const userEmail = req.params.userEmail;
+      const email = req.user["email"];
+      if (userEmail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
       const result = await tempPurchaseProductCollections
         .find({ userMail: userEmail })
         .sort({ _id: -1 })
@@ -937,8 +1022,14 @@ async function run() {
 
     // ---------------------------Summary start-----------------------------------------------------------------
 
-    app.get("/getSummary", async (req, res) => {
+    app.get("/getSummary", verifyToken, async (req, res) => {
       try {
+        const userMail = req.query["userEmail"];
+        const email = req.user["email"];
+
+        if (userMail !== email) {
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
         const todaysDate = moment(new Date()).format("DD.MM.YYYY");
 
         // Fetch sales invoices for today's date
@@ -1446,7 +1537,13 @@ async function run() {
     // show customer Ledger end .............................................
 
     // Get all customer for excel download
-    app.get("/allCustomer", async (req, res) => {
+    app.get("/allCustomer", verifyToken, async (req, res) => {
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      };
       const result = await customerDueCollections
         .find()
         .sort({ _id: -1 })
@@ -2159,10 +2256,18 @@ async function run() {
     });
 
     // show customer...................................
-    app.get("/customers", async (req, res) => {
+    app.get("/customers", verifyToken, async (req, res) => {
       const page = parseInt(req.query.page);
       const size = parseInt(req.query.size);
       const search = req.query.search || "";
+
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
+
 
       let numericSearch = parseFloat(search);
       if (isNaN(numericSearch)) {
@@ -2181,6 +2286,9 @@ async function run() {
           ],
         }
         : {};
+
+
+
 
       const result = await customerCollections
         .find(query)
@@ -2377,8 +2485,14 @@ async function run() {
     });
 
     // Return customer.................................................................................................
-    app.get("/returnCustomerInvoice/:invoiceNumber", async (req, res) => {
+    app.get("/returnCustomerInvoice/:invoiceNumber", verifyToken, async (req, res) => {
       try {
+        const userMail = req.query["userEmail"];
+        const email = req.user["email"];
+
+        if (userMail !== email) {
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
         const invoiceNumber = parseInt(req.params.invoiceNumber);
         const result = await salesInvoiceCollections.findOne({ invoiceNumber });
         if (!result) {
@@ -2673,8 +2787,14 @@ async function run() {
     });
 
     // Return supplier...................................................................................................
-    app.get("/returnSupplierInvoice/:invoiceNumber", async (req, res) => {
+    app.get("/returnSupplierInvoice/:invoiceNumber", verifyToken, async (req, res) => {
       try {
+        const userMail = req.query["userEmail"];
+        const email = req.user["email"];
+
+        if (userMail !== email) {
+          return res.status(401).send({ message: "Forbidden Access" });
+        }
         const invoiceNumber = parseInt(req.params.invoiceNumber);
         const result = await purchaseInvoiceCollections.findOne({
           invoiceNumber,
