@@ -2029,88 +2029,265 @@ async function run() {
       }
     });
     // supplier payment end .................................................
+    // add customer balance
+    app.post("/receiveCustomerBalance/:id", async (req, res) => {
+      const id = parseInt(req.params.id);
+      const { date, receiveConfirmAmount, receiveNote, paymentMethod, userName } = req.body;
+    
+      try {
+        // Find customer in customerDueCollections
+        const customer = await customerDueCollections.findOne({
+          customerSerial: id,
+        });
+    
+        // Proceed only if the customer exists
+        if (customer) {
+          // Update acBalance and push to balanceHistory
+          await customerDueCollections.updateOne(
+            { customerSerial: id },
+            {
+              $inc: { acBalance: receiveConfirmAmount },
+              $push: {
+                balanceHistory: {
+                  date,
+                  receivedAmount: receiveConfirmAmount,
+                  paymentMethod,
+                  receiveNote,
+                  userName,
+                },
+              },
+            }
+          );
+        } else {
+          return res.status(404).json({ message: "Customer not found" });
+        }
+
+        // Update main balance
+        const existingBalance = await mainBalanceCollections.findOne();
+        if (existingBalance) {
+          await mainBalanceCollections.updateOne(
+            {},
+            { $inc: { mainBalance: receiveConfirmAmount } }
+          );
+        } else {
+          return res.status(500).json({ message: "Main balance record not found" });
+        }
+    
+        // Add transaction to transactionCollections
+        const findCustomer = await customerCollections.findOne({ serial: id });
+        if (!findCustomer) {
+          return res.status(404).json({ message: "Customer not found in customer due list" });
+        }
+    
+        const recentSerialTransaction = await transactionCollections
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+    
+        let nextSerial = 10; // Default starting serial number
+        if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
+          nextSerial = recentSerialTransaction[0].serial + 1;
+        }
+    
+        await transactionCollections.insertOne({
+          serial: nextSerial,
+          totalBalance: receiveConfirmAmount,
+          note: `Received from ${findCustomer.customerName}`,
+          date,
+          type: "Credit",
+          userName,
+        });
+    
+        // Send success response after all operations complete successfully
+        res.status(200).json("success");
+    
+      } catch (error) {
+        console.error("Error receiving customer balance:", error);
+        res.status(500).json({ message: "Failed to receive customer balance", error });
+      }
+    });
+    
+
+    // Pay customer due by account
+    app.post("/payCustomerByAccount/:id", async (req, res) => {
+      const id = parseInt(req.params.id);
+      const { date, paidAmount, paymentMethod, payNote, userName } = req.body;
+    
+      try {
+        // Retrieve customer
+        const customer = await customerDueCollections.findOne({
+          customerSerial: id,
+        });
+    
+        // Update customer due amount, account balance, and push payment history if customer exists
+        if (customer) {
+          const updatedDueAmount = customer.dueAmount - paidAmount;
+          await customerDueCollections.updateOne(
+            { customerSerial: id },
+            {
+              $set: { dueAmount: updatedDueAmount },
+              $inc: { acBalance: -paidAmount },
+              $push: {
+                paymentHistory: {
+                  date,
+                  paidAmount,
+                  paymentMethod,
+                  payNote,
+                  userName,
+                },
+              },
+            }
+          );
+        } else {
+          return res.status(404).json({ message: "Customer not found" });
+        }
+    
+        // Update customer due balance
+        const customerDue = await customerDueBalanceCollections.findOne({});
+        if (customerDue) {
+          await customerDueBalanceCollections.updateOne(
+            {},
+            {
+              $inc: {
+                customerDueBalance: -paidAmount,
+              },
+            }
+          );
+        } else {
+          return res.status(500).json({ message: "Customer due balance record not found" });
+        }
+    
+        // Add transaction record
+        const findCustomer = await customerCollections.findOne({ serial: id });
+        if (!findCustomer) {
+          return res.status(404).json({ message: "Customer not found in customerCollections" });
+        }
+    
+        const recentSerialTransaction = await transactionCollections
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+    
+        let nextSerial = 10; // Default starting serial number
+        if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
+          nextSerial = recentSerialTransaction[0].serial + 1;
+        }
+    
+        await transactionCollections.insertOne({
+          serial: nextSerial,
+          totalBalance: paidAmount,
+          note: `Received from ${findCustomer.customerName}`,
+          date,
+          type: "Transfer",
+          userName,
+        });
+    
+        // Send success response after all operations complete successfully
+        res.status(200).json("success");
+    
+      } catch (error) {
+        console.error("Error processing payment by account:", error);
+        res.status(500).json({ message: "Failed to process payment by account", error });
+      }
+    });
+    
 
     // customer payment start .................................................
     app.post("/payCustomer/:id", async (req, res) => {
       const id = parseInt(req.params.id);
       const { date, paidAmount, paymentMethod, payNote, userName } = req.body;
-
-      const customer = await customerDueCollections.findOne({
-        customerSerial: id,
-      });
-      if (customer) {
-        const updatedDueAmount = customer.dueAmount - paidAmount;
-        await customerDueCollections.updateOne(
-          { customerSerial: id },
-          {
-            $set: { dueAmount: updatedDueAmount },
-            $push: {
-              paymentHistory: {
-                date,
-                paidAmount,
-                paymentMethod,
-                payNote,
-                userName,
+    
+      try {
+        // Retrieve customer
+        const customer = await customerDueCollections.findOne({
+          customerSerial: id,
+        });
+    
+        // Update customer due amount and push payment history if customer exists
+        if (customer) {
+          const updatedDueAmount = customer.dueAmount - paidAmount;
+          await customerDueCollections.updateOne(
+            { customerSerial: id },
+            {
+              $set: { dueAmount: updatedDueAmount },
+              $push: {
+                paymentHistory: {
+                  date,
+                  paidAmount,
+                  paymentMethod,
+                  payNote,
+                  userName,
+                },
               },
-            },
-          }
-        );
-
+            }
+          );
+        } else {
+          return res.status(404).json({ message: "Customer not found" });
+        }
+    
+        // Update main balance
         const existingBalance = await mainBalanceCollections.findOne();
         if (existingBalance) {
           await mainBalanceCollections.updateOne(
             {},
             { $inc: { mainBalance: paidAmount } }
           );
-
-          const customerDue = await customerDueBalanceCollections.findOne({});
-          if (customerDue) {
-            await customerDueBalanceCollections.updateOne(
-              {},
-              {
-                $inc: {
-                  customerDueBalance: -paidAmount,
-                },
-              }
-            );
-          }
-
-          //add transaction list with serial
-          const findCustomer = await customerCollections.findOne({
-            serial: id,
-          });
-          const recentSerialTransaction = await transactionCollections
-            .find()
-            .sort({ serial: -1 })
-            .limit(1)
-            .toArray();
-
-          let nextSerial = 10; // Default starting serial number
-          if (
-            recentSerialTransaction.length > 0 &&
-            recentSerialTransaction[0].serial
-          ) {
-            nextSerial = recentSerialTransaction[0].serial + 1;
-          }
-
-          await transactionCollections.insertOne({
-            serial: nextSerial,
-            totalBalance: paidAmount,
-            note: `Received from ${findCustomer.customerName}`,
-            date,
-            type: "Received",
-            userName,
-          });
+        } else {
+          return res.status(500).json({ message: "Main balance record not found" });
         }
-
-        // const duaPaid = await customerDueCollections.findOne({customerSerial:id});
-        // if(duaPaid.dueAmount <= 0){
-        //   await customerDueCollections.deleteOne({dueAmount: 0});
-        // }
-
-        res.json("success");
+    
+        // Update customer due balance
+        const customerDue = await customerDueBalanceCollections.findOne({});
+        if (customerDue) {
+          await customerDueBalanceCollections.updateOne(
+            {},
+            {
+              $inc: {
+                customerDueBalance: -paidAmount,
+              },
+            }
+          );
+        } else {
+          return res.status(500).json({ message: "Customer due balance record not found" });
+        }
+    
+        // Add transaction record
+        const findCustomer = await customerCollections.findOne({ serial: id });
+        if (!findCustomer) {
+          return res.status(404).json({ message: "Customer not found in customerCollections" });
+        }
+    
+        const recentSerialTransaction = await transactionCollections
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+    
+        let nextSerial = 10; // Default starting serial number
+        if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
+          nextSerial = recentSerialTransaction[0].serial + 1;
+        }
+    
+        await transactionCollections.insertOne({
+          serial: nextSerial,
+          totalBalance: paidAmount,
+          note: `Received from ${findCustomer.customerName}`,
+          date,
+          type: "Received",
+          userName,
+        });
+    
+        // Send success response after all operations are completed
+        res.status(200).json("success");
+    
+      } catch (error) {
+        console.error("Error processing payment:", error);
+        res.status(500).json({ message: "Failed to process payment", error });
       }
     });
+    
     // customer payment end .................................................
 
     // get invoice list
@@ -2199,6 +2376,39 @@ async function run() {
         }
         : {};
 
+      // update stock
+      app.put("/updateStock/:id", async (req, res) => {
+        const { id } = req.params;
+        const { purchaseQuantity, purchasePrice } = req.body;
+
+        try {
+          // Validate ID format
+          if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid ID format" });
+          }
+
+          // Update the stock item with the given ID
+          const updatedStock = await stockCollections.findOneAndUpdate(
+            { _id: new ObjectId(id) }, // Wrap id with ObjectId
+            {
+              $set: {
+                purchaseQuantity,
+                purchasePrice,
+              },
+            },
+            { new: true, returnDocument: "after" } // Return the updated document in the response
+          );
+
+          if (!updatedStock) {
+            return res.status(404).json({ message: "Stock item not found" });
+          }
+
+          res.status(200).json({ message: "Stock updated successfully", updatedStock });
+        } catch (error) {
+          console.error("Error updating stock:", error);
+          res.status(500).json({ message: "Failed to update stock" });
+        }
+      });
 
 
       // Get paginated results
