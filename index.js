@@ -46,12 +46,12 @@ const verifyToken = (req, res, next) => {
 
 
   if (!authHeader) {
-    return res.status(401).send({ message: "No token provided" });
+    return res.status(401).send({ message: "Access forbidden" });
   }
 
   const token = authHeader.split(" ")[1];
   if (!token) {
-    return res.status(401).send({ message: "Access forbidden" });
+    return res.status(401).send({ message: "No authorization" });
   }
 
   jwt.verify(token, process.env.TOKEN_SECRET, (err, decoded) => {
@@ -87,7 +87,7 @@ app.post("/validate-token", (req, res) => {
   if (!token) {
     return res
       .status(400)
-      .send({ success: false, message: "Token not provided" });
+      .send({ success: false, message: "Forbidden access" });
   }
 
   // Verify the token
@@ -368,6 +368,23 @@ async function run() {
           productCode: productCode,
         },
       };
+      const filterInStock = ({ productID: existingProduct.productCode });
+      if (filterInStock) {
+        const updateStockInfo = {
+          $set: {
+            productTitle: updateProductName,
+            category: updateCategory,
+            brand: updateBrand,
+            purchaseUnit: updateUnit,
+            productID: productCode,
+          },
+        };
+        await stockCollections.updateOne(filterInStock, updateStockInfo);
+      }
+
+
+
+
       const result = await productCollections.updateOne(filter, updateInfo);
       res.send(result);
     });
@@ -1536,7 +1553,7 @@ async function run() {
     });
     // show customer Ledger end .............................................
 
-    // Get all customer for excel download
+    // Get all customer due list for excel download
     app.get("/allCustomer", verifyToken, async (req, res) => {
       const userMail = req.query["userEmail"];
       const email = req.user["email"];
@@ -1545,6 +1562,20 @@ async function run() {
         return res.status(401).send({ message: "Forbidden Access" });
       };
       const result = await customerDueCollections
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
+      res.send(result);
+    });
+    // Get all supplier due list for excel download
+    app.get("/allSupplier", verifyToken, async (req, res) => {
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      };
+      const result = await supplierDueCollections
         .find()
         .sort({ _id: -1 })
         .toArray();
@@ -2033,13 +2064,13 @@ async function run() {
     app.post("/receiveCustomerBalance/:id", async (req, res) => {
       const id = parseInt(req.params.id);
       const { date, receiveConfirmAmount, receiveNote, paymentMethod, userName } = req.body;
-    
+
       try {
         // Find customer in customerDueCollections
         const customer = await customerDueCollections.findOne({
           customerSerial: id,
         });
-    
+
         // Proceed only if the customer exists
         if (customer) {
           // Update acBalance and push to balanceHistory
@@ -2072,24 +2103,24 @@ async function run() {
         } else {
           return res.status(500).json({ message: "Main balance record not found" });
         }
-    
+
         // Add transaction to transactionCollections
         const findCustomer = await customerCollections.findOne({ serial: id });
         if (!findCustomer) {
           return res.status(404).json({ message: "Customer not found in customer due list" });
         }
-    
+
         const recentSerialTransaction = await transactionCollections
           .find()
           .sort({ serial: -1 })
           .limit(1)
           .toArray();
-    
+
         let nextSerial = 10; // Default starting serial number
         if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
           nextSerial = recentSerialTransaction[0].serial + 1;
         }
-    
+
         await transactionCollections.insertOne({
           serial: nextSerial,
           totalBalance: receiveConfirmAmount,
@@ -2098,28 +2129,28 @@ async function run() {
           type: "Credit",
           userName,
         });
-    
+
         // Send success response after all operations complete successfully
         res.status(200).json("success");
-    
+
       } catch (error) {
         console.error("Error receiving customer balance:", error);
         res.status(500).json({ message: "Failed to receive customer balance", error });
       }
     });
-    
+
 
     // Pay customer due by account
     app.post("/payCustomerByAccount/:id", async (req, res) => {
       const id = parseInt(req.params.id);
       const { date, paidAmount, paymentMethod, payNote, userName } = req.body;
-    
+
       try {
         // Retrieve customer
         const customer = await customerDueCollections.findOne({
           customerSerial: id,
         });
-    
+
         // Update customer due amount, account balance, and push payment history if customer exists
         if (customer) {
           const updatedDueAmount = customer.dueAmount - paidAmount;
@@ -2142,7 +2173,7 @@ async function run() {
         } else {
           return res.status(404).json({ message: "Customer not found" });
         }
-    
+
         // Update customer due balance
         const customerDue = await customerDueBalanceCollections.findOne({});
         if (customerDue) {
@@ -2157,24 +2188,24 @@ async function run() {
         } else {
           return res.status(500).json({ message: "Customer due balance record not found" });
         }
-    
+
         // Add transaction record
         const findCustomer = await customerCollections.findOne({ serial: id });
         if (!findCustomer) {
           return res.status(404).json({ message: "Customer not found in customerCollections" });
         }
-    
+
         const recentSerialTransaction = await transactionCollections
           .find()
           .sort({ serial: -1 })
           .limit(1)
           .toArray();
-    
+
         let nextSerial = 10; // Default starting serial number
         if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
           nextSerial = recentSerialTransaction[0].serial + 1;
         }
-    
+
         await transactionCollections.insertOne({
           serial: nextSerial,
           totalBalance: paidAmount,
@@ -2183,28 +2214,28 @@ async function run() {
           type: "Transfer",
           userName,
         });
-    
+
         // Send success response after all operations complete successfully
         res.status(200).json("success");
-    
+
       } catch (error) {
         console.error("Error processing payment by account:", error);
         res.status(500).json({ message: "Failed to process payment by account", error });
       }
     });
-    
+
 
     // customer payment start .................................................
     app.post("/payCustomer/:id", async (req, res) => {
       const id = parseInt(req.params.id);
       const { date, paidAmount, paymentMethod, payNote, userName } = req.body;
-    
+
       try {
         // Retrieve customer
         const customer = await customerDueCollections.findOne({
           customerSerial: id,
         });
-    
+
         // Update customer due amount and push payment history if customer exists
         if (customer) {
           const updatedDueAmount = customer.dueAmount - paidAmount;
@@ -2226,7 +2257,7 @@ async function run() {
         } else {
           return res.status(404).json({ message: "Customer not found" });
         }
-    
+
         // Update main balance
         const existingBalance = await mainBalanceCollections.findOne();
         if (existingBalance) {
@@ -2237,7 +2268,7 @@ async function run() {
         } else {
           return res.status(500).json({ message: "Main balance record not found" });
         }
-    
+
         // Update customer due balance
         const customerDue = await customerDueBalanceCollections.findOne({});
         if (customerDue) {
@@ -2252,24 +2283,24 @@ async function run() {
         } else {
           return res.status(500).json({ message: "Customer due balance record not found" });
         }
-    
+
         // Add transaction record
         const findCustomer = await customerCollections.findOne({ serial: id });
         if (!findCustomer) {
           return res.status(404).json({ message: "Customer not found in customerCollections" });
         }
-    
+
         const recentSerialTransaction = await transactionCollections
           .find()
           .sort({ serial: -1 })
           .limit(1)
           .toArray();
-    
+
         let nextSerial = 10; // Default starting serial number
         if (recentSerialTransaction.length > 0 && recentSerialTransaction[0].serial) {
           nextSerial = recentSerialTransaction[0].serial + 1;
         }
-    
+
         await transactionCollections.insertOne({
           serial: nextSerial,
           totalBalance: paidAmount,
@@ -2278,16 +2309,16 @@ async function run() {
           type: "Received",
           userName,
         });
-    
+
         // Send success response after all operations are completed
         res.status(200).json("success");
-    
+
       } catch (error) {
         console.error("Error processing payment:", error);
         res.status(500).json({ message: "Failed to process payment", error });
       }
     });
-    
+
     // customer payment end .................................................
 
     // get invoice list
