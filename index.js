@@ -24,9 +24,14 @@ const port = process.env.PORT || 9000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const moment = require("moment");
 
+// Office
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@graphicsaction.dpne6.mongodb.net/?retryWrites=true&w=majority&appName=Graphicsaction`;
 
+// Personal
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@hardwarestore.bbhhx17.mongodb.net/?retryWrites=true&w=majority&appName=hardwareStore`;
+
+// Demo
+// const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@demo-hardware.l9se4.mongodb.net/?retryWrites=true&w=majority&appName=demo-hardware`;
 
 const client = new MongoClient(uri, {
   serverApi: {
