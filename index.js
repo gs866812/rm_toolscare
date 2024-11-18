@@ -116,6 +116,13 @@ app.post("/logOut", async (req, res) => {
 async function run() {
   try {
     const database = client.db("hardwareShop");
+    const debtDB = client.db("debtMaintain");
+    const borrowerCollections = debtDB.collection("borrowerList");
+    const currentBalanceCollections = debtDB.collection("currentBalanceList");
+    const allTransactions = debtDB.collection("transactionList");
+
+
+
     const categoryCollections = database.collection("categoryList");
     const brandCollections = database.collection("brandList");
     const unitCollections = database.collection("unitList");
@@ -2622,6 +2629,8 @@ async function run() {
       const result = await supplierDueBalanceCollections.find().toArray();
       res.send(result);
     });
+
+
     app.get("/customerTotalDueBalance", verifyToken, async (req, res) => {
       const userMail = req.query["userEmail"];
       const email = req.user["email"];
@@ -3329,6 +3338,307 @@ async function run() {
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: "Internal Server Error" });
+      }
+    });
+
+
+    // Debt system start here......................................................................
+    // borrowerCollections
+    app.post("/debt/borrowerList", async (req, res) => {
+      const borrowerInfo = req.body;
+      const { contactNumber } = borrowerInfo;
+      const isBorrowerExist = await borrowerCollections.findOne({
+        contactNumber,
+      });
+
+      //add borrower list with serial
+      const recentBorrower = await borrowerCollections
+        .find()
+        .sort({ serial: -1 })
+        .limit(1)
+        .toArray();
+
+      let nextSerial = 10; // Default starting serial number
+      if (recentBorrower.length > 0 && recentBorrower[0].serial) {
+        nextSerial = recentBorrower[0].serial + 1;
+      }
+      const newBorrowerInfo = { ...borrowerInfo, serial: nextSerial, crBalance: 0, drBalance: 0, statements: [] };
+
+      if (isBorrowerExist) {
+        res.json("Mobile number already exists");
+      } else {
+        const result = await borrowerCollections.insertOne(newBorrowerInfo);
+        res.send(result);
+      }
+    });
+
+    // ----------------------------------------------------------------
+
+    // borrowerCollections
+    app.post("/debt/receivedMoney", async (req, res) => {
+      try {
+        const { date, rcvAmount, serial, note, method, userName } = req.body;
+
+        const borrower = await borrowerCollections.findOne({
+          serial,
+        });
+
+        if (!borrower) {
+          return res.status(404).json({ message: "Borrower not found" });
+        }
+
+        await borrowerCollections.updateOne(
+          { serial: borrower.serial },
+          {
+            $inc: { crBalance: rcvAmount },
+            $push: {
+              statements: {
+                date,
+                amount: rcvAmount,
+                paymentMethod: method,
+                note,
+                userName,
+              },
+            },
+          }
+        );
+
+        // update currentBalanceCollections
+
+        const currentBalance = await currentBalanceCollections.findOne({});
+        if (currentBalance) {
+          await currentBalanceCollections.updateOne(
+
+            {},
+            {
+              $inc: { totalBalance: rcvAmount },
+            }
+          )
+        } else {
+          await currentBalanceCollections.insertOne(
+            {
+              totalBalance: rcvAmount
+            }
+          )
+        };
+
+        // update main balance
+        const existingBalanceDoc = await mainBalanceCollections.findOne();
+        if (existingBalanceDoc) {
+          // Update existing document by adding newBalance to mainBalance
+          const updatedMainBalance = existingBalanceDoc.mainBalance + rcvAmount;
+          await mainBalanceCollections.updateOne(
+            {},
+            { $set: { mainBalance: updatedMainBalance } }
+          );
+        } else {
+          // Insert new document with newBalance as mainBalance
+          await mainBalanceCollections.insertOne({ mainBalance: rcvAmount });
+        };
+
+        //add transaction list with serial
+        const recentSerialTransaction = await transactionCollections
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+
+        let nextSerial = 10; // Default starting serial number
+        if (
+          recentSerialTransaction.length > 0 &&
+          recentSerialTransaction[0].serial
+        ) {
+          nextSerial = recentSerialTransaction[0].serial + 1;
+        }
+
+        await transactionCollections.insertOne({
+          serial: nextSerial,
+          totalBalance: rcvAmount,
+          note,
+          date,
+          type: "DEBT IN",
+          userName,
+        });
+
+
+
+        //add debt transaction list with serial
+        const recentDebtSerialTransaction = await allTransactions
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+
+        let nextDebtSerial = 10; // Default starting serial number
+        if (
+          recentDebtSerialTransaction.length > 0 &&
+          recentDebtSerialTransaction[0].serial
+        ) {
+          nextDebtSerial = recentDebtSerialTransaction[0].serial + 1;
+        }
+
+        await allTransactions.insertOne({
+          serial: nextDebtSerial,
+          receiver: borrower.borrowerName,
+          rcvAmount,
+          note,
+          date,
+          type: 'IN',
+          userName,
+        });
+
+        // Respond with success message and optional updated data
+        res.status(200).json({
+          message: "Money received successfully",
+        });
+      } catch (error) {
+
+        res.status(500).json({ error: "An error occurred while processing the request" });
+      }
+    });
+
+
+    // get borrower list
+    app.get("/borrowerList", verifyToken, async (req, res) => {
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
+      const result = await borrowerCollections.find().sort({ _id: -1 }).toArray();
+      res.send(result);
+    });
+
+    // get debt balance ................................................
+    app.get("/getDebtBalance", verifyToken, async (req, res) => {
+      const userMail = req.query["userEmail"];
+      const email = req.user["email"];
+
+      if (userMail !== email) {
+        return res.status(401).send({ message: "Forbidden Access" });
+      }
+      const result = await currentBalanceCollections.find().toArray();
+      res.send(result);
+    });
+
+    // return money .................................................................................
+    app.post("/debt/returnMoney", async (req, res) => {
+      try {
+        const { date, payAmount, returnNote, serial, returnMethod, userName } = req.body;
+
+        const borrower = await borrowerCollections.findOne({
+          serial,
+        });
+
+        if (payAmount > borrower.crBalance) {
+          return res.send("Can't over payment");
+        }
+
+        if (!borrower) {
+          return res.status(404).json({ message: "Borrower not found" });
+        }
+
+        // update currentBalanceCollections
+
+        const existingBalance = await mainBalanceCollections.findOne({});
+        if (existingBalance.mainBalance >= payAmount) {
+          await mainBalanceCollections.updateOne(
+            {},
+            {
+              $inc: { mainBalance: -payAmount },
+            }
+          );
+        } else {
+          return res.json("Insufficient balance");
+        }
+
+        const currentBalance = await currentBalanceCollections.findOne({});
+        if (currentBalance) {
+          await currentBalanceCollections.updateOne(
+
+            {},
+            {
+              $inc: { totalBalance: -payAmount },
+            }
+          )
+        }
+
+
+        await borrowerCollections.updateOne(
+          { serial: borrower.serial },
+          {
+            $inc: { crBalance: -payAmount, drBalance: payAmount },
+            $push: {
+              statements: {
+                date,
+                payAmount,
+                paymentMethod: returnMethod,
+                note: returnNote,
+                userName,
+              },
+            },
+          }
+        );
+
+
+        //add transaction list with serial
+        const recentSerialTransaction = await transactionCollections
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+
+        let nextSerial = 10; // Default starting serial number
+        if (
+          recentSerialTransaction.length > 0 &&
+          recentSerialTransaction[0].serial
+        ) {
+          nextSerial = recentSerialTransaction[0].serial + 1;
+        }
+
+        await transactionCollections.insertOne({
+          serial: nextSerial,
+          totalBalance: payAmount,
+          note: returnNote,
+          date,
+          type: "DEBT OUT",
+          userName,
+        });
+
+
+
+        //add transaction list with serial
+        const recentDebtSerialTransaction = await allTransactions
+          .find()
+          .sort({ serial: -1 })
+          .limit(1)
+          .toArray();
+
+        let nextDebtSerial = 10; // Default starting serial number
+        if (
+          recentDebtSerialTransaction.length > 0 &&
+          recentDebtSerialTransaction[0].serial
+        ) {
+          nextDebtSerial = recentDebtSerialTransaction[0].serial + 1;
+        }
+
+        await allTransactions.insertOne({
+          serial: nextDebtSerial,
+          receiver: borrower.borrowerName,
+          balance: payAmount,
+          note: returnNote,
+          date,
+          type: 'OUT',
+          userName,
+        });
+
+        // Respond with success message and optional updated data
+        res.send('Success');
+
+      } catch (error) {
+
+        res.status(500).json({ error: "An error occurred while processing the request" });
       }
     });
 
