@@ -9,7 +9,7 @@ const fs = require("fs");
 const app = express();
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://store.mozumdarhat.com"],
+    origin: ["https://api.rm.toolscare.net"],
     credentials: true,
   })
 );
@@ -19,7 +19,7 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 app.use(express.json());
 
-const port = process.env.PORT || 9000;
+const port = process.env.PORT || 4001;
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const moment = require("moment");
@@ -30,8 +30,7 @@ const moment = require("moment");
 // Personal
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@hardwarestore.bbhhx17.mongodb.net/?retryWrites=true&w=majority&appName=hardwareStore`;
 
-// Demo
-// const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@demo-hardware.l9se4.mongodb.net/?retryWrites=true&w=majority&appName=demo-hardware`;
+
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -116,48 +115,43 @@ app.post("/logOut", async (req, res) => {
 async function run() {
   try {
     const database = client.db("hardwareShop");
-    const debtDB = client.db("debtMaintain");
-    const borrowerCollections = debtDB.collection("borrowerList");
-    const currentBalanceCollections = debtDB.collection("currentBalanceList");
-    const allTransactions = debtDB.collection("transactionList");
+    const toolsCare1 = client.db("rmToolsCare");
 
-
-
-    const categoryCollections = database.collection("categoryList");
-    const brandCollections = database.collection("brandList");
-    const unitCollections = database.collection("unitList");
-    const productCollections = database.collection("productList");
-    const supplierCollections = database.collection("supplierList");
-    const transactionCollections = database.collection("transactionList");
-    const mainBalanceCollections = database.collection("mainBalanceList");
-    const costingBalanceCollections = database.collection("costingBalanceList");
-    const tempPurchaseProductCollections = database.collection(
+    const categoryCollections = toolsCare1.collection("categoryList");
+    const brandCollections = toolsCare1.collection("brandList");
+    const unitCollections = toolsCare1.collection("unitList");
+    const productCollections = toolsCare1.collection("productList");
+    const supplierCollections = toolsCare1.collection("supplierList");
+    const transactionCollections = toolsCare1.collection("transactionList");
+    const mainBalanceCollections = toolsCare1.collection("mainBalanceList");
+    const costingBalanceCollections = toolsCare1.collection("costingBalanceList");
+    const tempPurchaseProductCollections = toolsCare1.collection(
       "tempPurchaseProductList"
     );
-    const tempSalesProductCollections = database.collection(
+    const tempSalesProductCollections = toolsCare1.collection(
       "tempSalesProductList"
     );
-    const tempQuotationProductCollections = database.collection(
+    const tempQuotationProductCollections = toolsCare1.collection(
       "tempQuotationProductList"
     );
-    const stockCollections = database.collection("stockList");
-    const purchaseInvoiceCollections = database.collection(
+    const stockCollections = toolsCare1.collection("stockList");
+    const purchaseInvoiceCollections = toolsCare1.collection(
       "purchaseInvoiceList"
     );
-    const salesInvoiceCollections = database.collection("salesInvoiceList");
-    const quotationCollections = database.collection("quotationList");
-    const customerCollections = database.collection("customerList");
-    const supplierDueCollections = database.collection("supplierDueList");
-    const customerDueCollections = database.collection("customerDueList");
-    const profitCollections = database.collection("profitList");
-    const supplierDueBalanceCollections = database.collection(
+    const salesInvoiceCollections = toolsCare1.collection("salesInvoiceList");
+    const quotationCollections = toolsCare1.collection("quotationList");
+    const customerCollections = toolsCare1.collection("customerList");
+    const supplierDueCollections = toolsCare1.collection("supplierDueList");
+    const customerDueCollections = toolsCare1.collection("customerDueList");
+    const profitCollections = toolsCare1.collection("profitList");
+    const supplierDueBalanceCollections = toolsCare1.collection(
       "supplierDueBalanceList"
     );
-    const customerDueBalanceCollections = database.collection(
+    const customerDueBalanceCollections = toolsCare1.collection(
       "customerDueBalanceList"
     );
-    const returnSalesCollections = database.collection("returnSalesList");
-    const returnPurchaseCollections = database.collection("returnPurchaseList");
+    const returnSalesCollections = toolsCare1.collection("returnSalesList");
+    const returnPurchaseCollections = toolsCare1.collection("returnPurchaseList");
 
     // jwt
     app.post("/jwt", (req, res) => {
@@ -3342,341 +3336,8 @@ async function run() {
     });
 
 
-    // Debt system start here......................................................................
-    // borrowerCollections
-    app.post("/debt/borrowerList", async (req, res) => {
-      const borrowerInfo = req.body;
-      const { contactNumber } = borrowerInfo;
-      const isBorrowerExist = await borrowerCollections.findOne({
-        contactNumber,
-      });
-
-      //add borrower list with serial
-      const recentBorrower = await borrowerCollections
-        .find()
-        .sort({ serial: -1 })
-        .limit(1)
-        .toArray();
-
-      let nextSerial = 10; // Default starting serial number
-      if (recentBorrower.length > 0 && recentBorrower[0].serial) {
-        nextSerial = recentBorrower[0].serial + 1;
-      }
-      const newBorrowerInfo = { ...borrowerInfo, serial: nextSerial, crBalance: 0, drBalance: 0, statements: [] };
-
-      if (isBorrowerExist) {
-        res.json("Mobile number already exists");
-      } else {
-        const result = await borrowerCollections.insertOne(newBorrowerInfo);
-        res.send(result);
-      }
-    });
-
-    // ----------------------------------------------------------------
-
-    // borrowerCollections
-    app.post("/debt/receivedMoney", async (req, res) => {
-      try {
-        const { date, rcvAmount, serial, note, method, userName } = req.body;
-
-        const borrower = await borrowerCollections.findOne({
-          serial,
-        });
-
-        if (!borrower) {
-          return res.status(404).json({ message: "Borrower not found" });
-        }
-
-        await borrowerCollections.updateOne(
-          { serial: borrower.serial },
-          {
-            $inc: { crBalance: rcvAmount },
-            $push: {
-              statements: {
-                date,
-                amount: rcvAmount,
-                paymentMethod: method,
-                note,
-                userName,
-              },
-            },
-          }
-        );
-
-        // update currentBalanceCollections
-
-        const currentBalance = await currentBalanceCollections.findOne({});
-        if (currentBalance) {
-          await currentBalanceCollections.updateOne(
-
-            {},
-            {
-              $inc: { totalBalance: rcvAmount },
-            }
-          )
-        } else {
-          await currentBalanceCollections.insertOne(
-            {
-              totalBalance: rcvAmount
-            }
-          )
-        };
-
-        // update main balance
-        const existingBalanceDoc = await mainBalanceCollections.findOne();
-        if (existingBalanceDoc) {
-          // Update existing document by adding newBalance to mainBalance
-          const updatedMainBalance = existingBalanceDoc.mainBalance + rcvAmount;
-          await mainBalanceCollections.updateOne(
-            {},
-            { $set: { mainBalance: updatedMainBalance } }
-          );
-        } else {
-          // Insert new document with newBalance as mainBalance
-          await mainBalanceCollections.insertOne({ mainBalance: rcvAmount });
-        };
-
-        //add transaction list with serial
-        const recentSerialTransaction = await transactionCollections
-          .find()
-          .sort({ serial: -1 })
-          .limit(1)
-          .toArray();
-
-        let nextSerial = 10; // Default starting serial number
-        if (
-          recentSerialTransaction.length > 0 &&
-          recentSerialTransaction[0].serial
-        ) {
-          nextSerial = recentSerialTransaction[0].serial + 1;
-        }
-
-        await transactionCollections.insertOne({
-          serial: nextSerial,
-          totalBalance: rcvAmount,
-          note,
-          date,
-          type: "DEBT IN",
-          userName,
-        });
 
 
-
-        //add debt transaction list with serial
-        const recentDebtSerialTransaction = await allTransactions
-          .find()
-          .sort({ serial: -1 })
-          .limit(1)
-          .toArray();
-
-        let nextDebtSerial = 10; // Default starting serial number
-        if (
-          recentDebtSerialTransaction.length > 0 &&
-          recentDebtSerialTransaction[0].serial
-        ) {
-          nextDebtSerial = recentDebtSerialTransaction[0].serial + 1;
-        }
-
-        await allTransactions.insertOne({
-          serial: nextDebtSerial,
-          receiver: borrower.borrowerName,
-          rcvAmount,
-          note,
-          date,
-          type: 'IN',
-          userName,
-        });
-
-        // Respond with success message and optional updated data
-        res.status(200).json({
-          message: "Money received successfully",
-        });
-      } catch (error) {
-
-        res.status(500).json({ error: "An error occurred while processing the request" });
-      }
-    });
-
-
-    // get borrower list
-    app.get("/borrowerList", verifyToken, async (req, res) => {
-      const userMail = req.query["userEmail"];
-      const email = req.user["email"];
-
-      if (userMail !== email) {
-        return res.status(401).send({ message: "Forbidden Access" });
-      }
-      const result = await borrowerCollections.find().sort({ _id: -1 }).toArray();
-      res.send(result);
-    });
-
-    // get debt balance ................................................
-    app.get("/getDebtBalance", verifyToken, async (req, res) => {
-      const userMail = req.query["userEmail"];
-      const email = req.user["email"];
-
-      if (userMail !== email) {
-        return res.status(401).send({ message: "Forbidden Access" });
-      }
-      const result = await currentBalanceCollections.find().toArray();
-      res.send(result);
-    });
-
-    // return money .................................................................................
-    app.post("/debt/returnMoney", async (req, res) => {
-      try {
-        const { date, payAmount, returnNote, serial, returnMethod, userName } = req.body;
-
-        const borrower = await borrowerCollections.findOne({
-          serial,
-        });
-
-        if (payAmount > borrower.crBalance) {
-          return res.send("Can't over payment");
-        }
-
-        if (!borrower) {
-          return res.status(404).json({ message: "Borrower not found" });
-        }
-
-        // update currentBalanceCollections
-
-        const existingBalance = await mainBalanceCollections.findOne({});
-        if (existingBalance.mainBalance >= payAmount) {
-          await mainBalanceCollections.updateOne(
-            {},
-            {
-              $inc: { mainBalance: -payAmount },
-            }
-          );
-        } else {
-          return res.json("Insufficient balance");
-        }
-
-        const currentBalance = await currentBalanceCollections.findOne({});
-        if (currentBalance) {
-          await currentBalanceCollections.updateOne(
-
-            {},
-            {
-              $inc: { totalBalance: -payAmount },
-            }
-          )
-        }
-
-
-        await borrowerCollections.updateOne(
-          { serial: borrower.serial },
-          {
-            $inc: { crBalance: -payAmount, drBalance: payAmount },
-            $push: {
-              statements: {
-                date,
-                payAmount,
-                paymentMethod: returnMethod,
-                note: returnNote,
-                userName,
-              },
-            },
-          }
-        );
-
-
-        //add transaction list with serial
-        const recentSerialTransaction = await transactionCollections
-          .find()
-          .sort({ serial: -1 })
-          .limit(1)
-          .toArray();
-
-        let nextSerial = 10; // Default starting serial number
-        if (
-          recentSerialTransaction.length > 0 &&
-          recentSerialTransaction[0].serial
-        ) {
-          nextSerial = recentSerialTransaction[0].serial + 1;
-        }
-
-        await transactionCollections.insertOne({
-          serial: nextSerial,
-          totalBalance: payAmount,
-          note: returnNote,
-          date,
-          type: "DEBT OUT",
-          userName,
-        });
-
-
-
-        //add transaction list with serial
-        const recentDebtSerialTransaction = await allTransactions
-          .find()
-          .sort({ serial: -1 })
-          .limit(1)
-          .toArray();
-
-        let nextDebtSerial = 10; // Default starting serial number
-        if (
-          recentDebtSerialTransaction.length > 0 &&
-          recentDebtSerialTransaction[0].serial
-        ) {
-          nextDebtSerial = recentDebtSerialTransaction[0].serial + 1;
-        }
-
-        await allTransactions.insertOne({
-          serial: nextDebtSerial,
-          receiver: borrower.borrowerName,
-          balance: payAmount,
-          note: returnNote,
-          date,
-          type: 'OUT',
-          userName,
-        });
-
-        // Respond with success message and optional updated data
-        res.send('Success');
-
-      } catch (error) {
-
-        res.status(500).json({ error: "An error occurred while processing the request" });
-      }
-    });
-
-    // .......................................................................
-
-    // const negativeEntries = await stockCollections
-    //   .find({ purchaseQuantity: { $lt: 0 } })
-    //   .toArray();
-
-    // for (let negEntry of negativeEntries) {
-    //   // Find the original document with the same productID and positive purchaseQuantity
-    //   const originalDoc = await stockCollections.findOne({
-    //     productID: negEntry.productID,
-    //     purchaseQuantity: { $gt: 0 },
-    //   });
-
-    //   if (originalDoc) {
-    //     // Update the original document's purchaseQuantity by subtracting the negative value
-    //     const updatedQuantity =
-    //       originalDoc.purchaseQuantity + negEntry.purchaseQuantity;
-
-    //     // Update the original document in the database
-    //     await stockCollections.updateOne(
-    //       { _id: originalDoc._id },
-    //       { $set: { purchaseQuantity: updatedQuantity } }
-    //     );
-
-    //     // Remove the negative entry after updating
-    //     await stockCollections.deleteOne({ _id: negEntry._id });
-    //   }
-    // }
-
-    // console.log("Database cleanup completed successfully.");
-
-    // const dataArray = await customerCollections.find({}).toArray();
-
-    // fs.writeFileSync('customerData.json', JSON.stringify(dataArray, null, 2));
-    // ................................................................................................................
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
