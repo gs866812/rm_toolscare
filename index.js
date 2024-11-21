@@ -9,7 +9,7 @@ const fs = require("fs");
 const app = express();
 app.use(
   cors({
-    origin: ["https://api.rm.toolscare.net"],
+    origin: ["https://rm.toolscare.net"],
     credentials: true,
   })
 );
